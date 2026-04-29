@@ -24,7 +24,7 @@ const GroupSearch: React.FC = () => {
     setPosts([]);
 
     try {
-      // 1. 调用你的 Worker 代理接口
+      // 1. 调用 Worker 代理接口
       const res = await fetch(`https://douban-proxy.chiyasu1018.workers.dev?user=${encodeURIComponent(userId)}`);
       if (!res.ok) throw new Error('网络请求失败');
       
@@ -35,25 +35,27 @@ const GroupSearch: React.FC = () => {
       const parser = new DOMParser();
       const doc = parser.parseFromString(data.html, 'text/html');
       
-      // 豆瓣小组话题列表通常在 table.olt 中
+      // 更新解析逻辑：针对 /topics 页面的 table.olt 结构
       const rows = doc.querySelectorAll('table.olt tr:not(.th)');
       
       const results: Post[] = Array.from(rows).map(row => {
+        // 标题链接：包含 /topic/ 的 a 标签
         const titleLink = row.querySelector('a[href*="/topic/"]') as HTMLAnchorElement;
+        // 小组链接：包含 /group/ 的 a 标签
         const groupLink = row.querySelector('a[href*="/group/"]') as HTMLAnchorElement;
-        // 查找包含日期格式的单元格
+        // 日期查找：在 td 中匹配 YYYY-MM-DD
         const cells = Array.from(row.querySelectorAll('td'));
         const dateCell = cells.find(td => /\d{4}-\d{2}-\d{2}/.test(td.textContent || ''));
 
         return {
-          title: titleLink?.textContent?.trim() || '',
+          title: titleLink?.getAttribute('title') || titleLink?.textContent?.trim() || '',
           link: titleLink?.href || '',
           groupName: groupLink?.textContent?.trim() || '',
           date: dateCell?.textContent?.trim() || ''
         };
       }).filter(item => item.title && item.groupName); // 过滤掉空行
       
-      if (results.length === 0) throw new Error('解析成功但未发现发帖数据，该用户可能设置了隐私或未加入小组');
+      if (results.length === 0) throw new Error('解析成功但未发现发帖数据，可能是该用户设置了隐私，或者 Worker 被豆瓣拦截');
       setPosts(results);
     } catch (err: any) {
       setError(err.message);
@@ -75,7 +77,6 @@ const GroupSearch: React.FC = () => {
   const wordFreq = useMemo(() => {
     const freq: Record<string, number> = {};
     posts.forEach(p => {
-      // 匹配 2 个字以上的中文词汇
       const words = p.title.match(/[\u4e00-\u9fa5]{2,}/g) || [];
       words.forEach(w => {
         if (!STOP_WORDS.has(w)) {
@@ -90,6 +91,7 @@ const GroupSearch: React.FC = () => {
     <div className="max-w-6xl mx-auto p-4 md:p-8 space-y-10">
       {/* 搜索区域 */}
       <div className="flex flex-col items-center gap-4">
+        <h2 className="text-2xl font-bold text-green-800">豆瓣用户发帖分析器</h2>
         <div className="flex w-full max-w-lg shadow-lg rounded-xl overflow-hidden border-2 border-green-600">
           <input 
             className="flex-1 px-4 py-3 outline-none text-lg"
@@ -107,22 +109,22 @@ const GroupSearch: React.FC = () => {
             查询
           </button>
         </div>
+        <p className="text-sm text-gray-500">注：仅能查询公开的“我的话题”列表</p>
         {error && <div className="text-red-500 bg-red-50 px-4 py-2 rounded-lg border border-red-100">{error}</div>}
       </div>
 
       {posts.length > 0 && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
           
-          {/* 左侧：小组统计与词云 */}
+          {/* 左侧：统计面板 */}
           <div className="lg:col-span-4 space-y-8">
-            {/* 1. 小组汇总 - 气泡样式 */}
             <section className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
               <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-green-800">
-                <PieChart size={20} /> 参与小组汇总
+                <PieChart size={20} /> 活跃小组汇总
               </h3>
               <div className="flex flex-wrap gap-2">
                 {groupSummary.map(([name, count]) => (
-                  <div key={name} className="flex items-center gap-2 bg-green-50 text-green-700 px-3 py-1.5 rounded-full border border-green-100 text-sm hover:scale-105 transition-transform">
+                  <div key={name} className="flex items-center gap-2 bg-green-50 text-green-700 px-3 py-1.5 rounded-full border border-green-100 text-sm">
                     <span className="font-semibold">{name}</span>
                     <span className="bg-green-600 text-white text-[10px] px-1.5 rounded-full">{count}</span>
                   </div>
@@ -130,21 +132,20 @@ const GroupSearch: React.FC = () => {
               </div>
             </section>
 
-            {/* 2. 高频词云 */}
             <section className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
               <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-green-800">
-                <Hash size={20} /> 话题词云
+                <Hash size={20} /> 话题高频词
               </h3>
               <div className="flex flex-wrap gap-x-4 gap-y-2 justify-center items-center py-4">
                 {wordFreq.map(([word, freq]) => (
                   <span 
                     key={word} 
                     style={{ 
-                      fontSize: `${Math.min(36, 14 + freq * 3)}px`, 
-                      opacity: 0.5 + (freq * 0.1),
+                      fontSize: `${Math.min(32, 14 + freq * 3)}px`, 
+                      opacity: 0.6 + (freq * 0.1),
                       color: freq > 2 ? '#047857' : '#6b7280'
                     }}
-                    className="font-medium hover:text-orange-500 cursor-default transition-colors"
+                    className="font-medium"
                   >
                     {word}
                   </span>
@@ -153,12 +154,15 @@ const GroupSearch: React.FC = () => {
             </section>
           </div>
 
-          {/* 右侧：帖子列表 */}
+          {/* 右侧：列表面板 */}
           <div className="lg:col-span-8">
             <section className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-              <div className="px-6 py-4 bg-gray-50 border-b border-gray-100 flex items-center gap-2">
-                <List size={20} className="text-green-800" />
-                <h3 className="text-lg font-bold text-green-800">帖子列表</h3>
+              <div className="px-6 py-4 bg-gray-50 border-b border-gray-100 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <List size={20} className="text-green-800" />
+                  <h3 className="text-lg font-bold text-green-800">发帖历史</h3>
+                </div>
+                <span className="text-sm text-gray-500">共计 {posts.length} 条数据</span>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-left">
@@ -166,7 +170,7 @@ const GroupSearch: React.FC = () => {
                     <tr>
                       <th className="px-6 py-3 font-semibold">标题内容</th>
                       <th className="px-6 py-3 font-semibold">所属小组</th>
-                      <th className="px-6 py-3 font-semibold w-32 text-right">日期</th>
+                      <th className="px-6 py-3 font-semibold w-32 text-right">发布时间</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50">
@@ -180,7 +184,7 @@ const GroupSearch: React.FC = () => {
                             className="text-gray-700 group-hover:text-green-700 font-medium flex items-center gap-1 leading-relaxed"
                           >
                             {post.title}
-                            <ExternalLink size={14} className="opacity-0 group-hover:opacity-100 text-gray-400" />
+                            <ExternalLink size={14} className="shrink-0 opacity-0 group-hover:opacity-100 text-gray-400" />
                           </a>
                         </td>
                         <td className="px-6 py-4">
