@@ -8,7 +8,6 @@ interface Post {
   date: string;
 }
 
-// 停用词库：过滤掉无意义的词，让词云更精准
 const STOP_WORDS = new Set(['的', '了', '在', '是', '我', '有', '和', '就', '不', '人', '都', '一', '一个', '上', '也', '很', '到', '说', '要', '去', '你', '会', '着', '没有', '看', '好', '自己', '这', '想', '吗', '吧', '还是', '怎么', '什么', '那个', '因为', '所以', '讨论', '大家', '觉得', '真的', '已经', '这种', '现在', '推荐', '分享', '有人', '开始']);
 
 const GroupSearch: React.FC = () => {
@@ -24,37 +23,34 @@ const GroupSearch: React.FC = () => {
     setPosts([]);
 
     try {
-      // 1. 调用 Worker 代理接口
+      // 调用 Worker（请确保 Worker 里的 URL 也同步更新为 .../discussions）
       const res = await fetch(`https://douban-proxy.chiyasu1018.workers.dev?user=${encodeURIComponent(userId)}`);
       if (!res.ok) throw new Error('网络请求失败');
       
       const data = await res.json();
-      if (!data.html) throw new Error('未能从豆瓣获取到内容，请检查用户 ID 是否正确');
+      if (!data.html) throw new Error('未能从豆瓣获取到内容');
 
-      // 2. 使用 DOMParser 解析 HTML
       const parser = new DOMParser();
       const doc = parser.parseFromString(data.html, 'text/html');
       
-      // --- 修改点：按照你的要求替换选择器逻辑 ---
+      // --- 新增：多重选择器回退逻辑 ---
       const selectors = ['table.olt tr', '.article table tr', 'div.article tr', 'tr'];
       let rows: Element[] = [];
       
       for (const sel of selectors) {
         const found = Array.from(doc.querySelectorAll(sel));
+        // 检查这一组行中是否包含有效的帖子链接
         const hasTopicLink = found.some(r => r.querySelector('a[href*="/topic/"]'));
         if (hasTopicLink) {
           rows = found;
-          break;
+          break; // 找到匹配的选择器，跳出循环
         }
       }
-      // ----------------------------------------
+      // -------------------------------
 
       const results: Post[] = rows.map(row => {
-        // 标题链接：包含 /topic/ 的 a 标签
         const titleLink = row.querySelector('a[href*="/topic/"]') as HTMLAnchorElement;
-        // 小组链接：包含 /group/ 的 a 标签
         const groupLink = row.querySelector('a[href*="/group/"]') as HTMLAnchorElement;
-        // 日期查找：在 td 中匹配 YYYY-MM-DD
         const cells = Array.from(row.querySelectorAll('td'));
         const dateCell = cells.find(td => /\d{4}-\d{2}-\d{2}/.test(td.textContent || ''));
 
@@ -64,9 +60,9 @@ const GroupSearch: React.FC = () => {
           groupName: groupLink?.textContent?.trim() || '',
           date: dateCell?.textContent?.trim() || ''
         };
-      }).filter(item => item.title && item.groupName); // 过滤掉空行
+      }).filter(item => item.title && item.groupName); 
       
-      if (results.length === 0) throw new Error('解析成功但未发现数据，请检查该用户是否公开了讨论列表');
+      if (results.length === 0) throw new Error('未发现发帖数据，可能是隐私设置或解析结构变化');
       setPosts(results);
     } catch (err: any) {
       setError(err.message);
@@ -75,7 +71,7 @@ const GroupSearch: React.FC = () => {
     }
   };
 
-  // 3. 数据分析：参与小组汇总
+  // 统计逻辑
   const groupSummary = useMemo(() => {
     const counts: Record<string, number> = {};
     posts.forEach(p => {
@@ -84,15 +80,12 @@ const GroupSearch: React.FC = () => {
     return Object.entries(counts).sort((a, b) => b[1] - a[1]);
   }, [posts]);
 
-  // 4. 数据分析：高频词云逻辑
   const wordFreq = useMemo(() => {
     const freq: Record<string, number> = {};
     posts.forEach(p => {
       const words = p.title.match(/[\u4e00-\u9fa5]{2,}/g) || [];
       words.forEach(w => {
-        if (!STOP_WORDS.has(w)) {
-          freq[w] = (freq[w] || 0) + 1;
-        }
+        if (!STOP_WORDS.has(w)) freq[w] = (freq[w] || 0) + 1;
       });
     });
     return Object.entries(freq).sort((a, b) => b[1] - a[1]).slice(0, 35);
@@ -100,13 +93,12 @@ const GroupSearch: React.FC = () => {
 
   return (
     <div className="max-w-6xl mx-auto p-4 md:p-8 space-y-10">
-      {/* 搜索区域 */}
       <div className="flex flex-col items-center gap-4">
-        <h2 className="text-2xl font-bold text-green-800">豆瓣用户发帖分析器</h2>
+        <h2 className="text-2xl font-bold text-green-800">豆瓣小组讨论分析</h2>
         <div className="flex w-full max-w-lg shadow-lg rounded-xl overflow-hidden border-2 border-green-600">
           <input 
             className="flex-1 px-4 py-3 outline-none text-lg"
-            placeholder="输入豆瓣用户 ID (需公开讨论列表)"
+            placeholder="输入用户 ID (需公开讨论列表)"
             value={userId}
             onChange={e => setUserId(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && handleSearch()}
@@ -114,24 +106,22 @@ const GroupSearch: React.FC = () => {
           <button 
             onClick={handleSearch}
             disabled={loading}
-            className="bg-green-600 text-white px-8 py-3 hover:bg-green-700 transition-colors flex items-center gap-2 font-bold"
+            className="bg-green-600 text-white px-8 py-3 hover:bg-green-700 flex items-center gap-2 font-bold"
           >
             {loading ? <Loader2 className="animate-spin" size={20} /> : <Search size={20} />}
             查询
           </button>
         </div>
-        <p className="text-sm text-gray-500">注：抓取地址已更新为 discussions 讨论列表</p>
         {error && <div className="text-red-500 bg-red-50 px-4 py-2 rounded-lg border border-red-100">{error}</div>}
       </div>
 
       {posts.length > 0 && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-          
-          {/* 左侧：统计面板 */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+          {/* 左侧统计 */}
           <div className="lg:col-span-4 space-y-8">
             <section className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
               <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-green-800">
-                <PieChart size={20} /> 活跃小组汇总
+                <PieChart size={20} /> 活跃小组
               </h3>
               <div className="flex flex-wrap gap-2">
                 {groupSummary.map(([name, count]) => (
@@ -145,19 +135,11 @@ const GroupSearch: React.FC = () => {
 
             <section className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
               <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-green-800">
-                <Hash size={20} /> 话题高频词
+                <Hash size={20} /> 关键词
               </h3>
               <div className="flex flex-wrap gap-x-4 gap-y-2 justify-center items-center py-4">
                 {wordFreq.map(([word, freq]) => (
-                  <span 
-                    key={word} 
-                    style={{ 
-                      fontSize: `${Math.min(32, 14 + freq * 3)}px`, 
-                      opacity: 0.6 + (freq * 0.1),
-                      color: freq > 2 ? '#047857' : '#6b7280'
-                    }}
-                    className="font-medium"
-                  >
+                  <span key={word} style={{ fontSize: `${Math.min(32, 14 + freq * 3)}px`, opacity: 0.6 + (freq * 0.1) }} className="font-medium text-green-900">
                     {word}
                   </span>
                 ))}
@@ -165,7 +147,7 @@ const GroupSearch: React.FC = () => {
             </section>
           </div>
 
-          {/* 右侧：列表面板 */}
+          {/* 右侧列表 */}
           <div className="lg:col-span-8">
             <section className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
               <div className="px-6 py-4 bg-gray-50 border-b border-gray-100 flex items-center justify-between">
@@ -173,14 +155,13 @@ const GroupSearch: React.FC = () => {
                   <List size={20} className="text-green-800" />
                   <h3 className="text-lg font-bold text-green-800">讨论记录</h3>
                 </div>
-                <span className="text-sm text-gray-500">共计 {posts.length} 条</span>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-left">
                   <thead className="bg-gray-50 text-gray-400 text-xs uppercase">
                     <tr>
-                      <th className="px-6 py-3 font-semibold">标题内容</th>
-                      <th className="px-6 py-3 font-semibold">所属小组</th>
+                      <th className="px-6 py-3 font-semibold">标题</th>
+                      <th className="px-6 py-3 font-semibold">小组</th>
                       <th className="px-6 py-3 font-semibold w-32 text-right">时间</th>
                     </tr>
                   </thead>
@@ -188,12 +169,7 @@ const GroupSearch: React.FC = () => {
                     {posts.map((post, i) => (
                       <tr key={i} className="hover:bg-green-50/30 transition-colors group">
                         <td className="px-6 py-4">
-                          <a 
-                            href={post.link} 
-                            target="_blank" 
-                            rel="noreferrer" 
-                            className="text-gray-700 group-hover:text-green-700 font-medium flex items-center gap-1 leading-relaxed"
-                          >
+                          <a href={post.link} target="_blank" rel="noreferrer" className="text-gray-700 group-hover:text-green-700 font-medium flex items-center gap-1 leading-relaxed">
                             {post.title}
                             <ExternalLink size={14} className="shrink-0 opacity-0 group-hover:opacity-100 text-gray-400" />
                           </a>
@@ -213,7 +189,6 @@ const GroupSearch: React.FC = () => {
               </div>
             </section>
           </div>
-
         </div>
       )}
     </div>
