@@ -29,16 +29,27 @@ const GroupSearch: React.FC = () => {
       if (!res.ok) throw new Error('网络请求失败');
       
       const data = await res.json();
-      if (!data.html) throw new Error('未能从豆瓣获取到内容，请检查用户 ID 是否正确（需为数字 ID 或唯一英文标识）');
+      if (!data.html) throw new Error('未能从豆瓣获取到内容，请检查用户 ID 是否正确');
 
       // 2. 使用 DOMParser 解析 HTML
       const parser = new DOMParser();
       const doc = parser.parseFromString(data.html, 'text/html');
       
-      // 更新解析逻辑：针对 /topics 页面的 table.olt 结构
-      const rows = doc.querySelectorAll('table.olt tr:not(.th)');
+      // --- 修改点：按照你的要求替换选择器逻辑 ---
+      const selectors = ['table.olt tr', '.article table tr', 'div.article tr', 'tr'];
+      let rows: Element[] = [];
       
-      const results: Post[] = Array.from(rows).map(row => {
+      for (const sel of selectors) {
+        const found = Array.from(doc.querySelectorAll(sel));
+        const hasTopicLink = found.some(r => r.querySelector('a[href*="/topic/"]'));
+        if (hasTopicLink) {
+          rows = found;
+          break;
+        }
+      }
+      // ----------------------------------------
+
+      const results: Post[] = rows.map(row => {
         // 标题链接：包含 /topic/ 的 a 标签
         const titleLink = row.querySelector('a[href*="/topic/"]') as HTMLAnchorElement;
         // 小组链接：包含 /group/ 的 a 标签
@@ -55,7 +66,7 @@ const GroupSearch: React.FC = () => {
         };
       }).filter(item => item.title && item.groupName); // 过滤掉空行
       
-      if (results.length === 0) throw new Error('解析成功但未发现发帖数据，可能是该用户设置了隐私，或者 Worker 被豆瓣拦截');
+      if (results.length === 0) throw new Error('解析成功但未发现数据，请检查该用户是否公开了讨论列表');
       setPosts(results);
     } catch (err: any) {
       setError(err.message);
@@ -95,7 +106,7 @@ const GroupSearch: React.FC = () => {
         <div className="flex w-full max-w-lg shadow-lg rounded-xl overflow-hidden border-2 border-green-600">
           <input 
             className="flex-1 px-4 py-3 outline-none text-lg"
-            placeholder="输入豆瓣用户 ID (如: 123456)"
+            placeholder="输入豆瓣用户 ID (需公开讨论列表)"
             value={userId}
             onChange={e => setUserId(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && handleSearch()}
@@ -109,7 +120,7 @@ const GroupSearch: React.FC = () => {
             查询
           </button>
         </div>
-        <p className="text-sm text-gray-500">注：仅能查询公开的“我的话题”列表</p>
+        <p className="text-sm text-gray-500">注：抓取地址已更新为 discussions 讨论列表</p>
         {error && <div className="text-red-500 bg-red-50 px-4 py-2 rounded-lg border border-red-100">{error}</div>}
       </div>
 
@@ -160,9 +171,9 @@ const GroupSearch: React.FC = () => {
               <div className="px-6 py-4 bg-gray-50 border-b border-gray-100 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <List size={20} className="text-green-800" />
-                  <h3 className="text-lg font-bold text-green-800">发帖历史</h3>
+                  <h3 className="text-lg font-bold text-green-800">讨论记录</h3>
                 </div>
-                <span className="text-sm text-gray-500">共计 {posts.length} 条数据</span>
+                <span className="text-sm text-gray-500">共计 {posts.length} 条</span>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-left">
@@ -170,7 +181,7 @@ const GroupSearch: React.FC = () => {
                     <tr>
                       <th className="px-6 py-3 font-semibold">标题内容</th>
                       <th className="px-6 py-3 font-semibold">所属小组</th>
-                      <th className="px-6 py-3 font-semibold w-32 text-right">发布时间</th>
+                      <th className="px-6 py-3 font-semibold w-32 text-right">时间</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50">
